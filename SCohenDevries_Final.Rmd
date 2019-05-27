@@ -1,0 +1,263 @@
+---
+title: "SCohenDevries_Final"
+author: "Sam Cohen-Devries"
+date: "5/27/2019"
+output:
+  word_document: default
+  html_document: default
+---
+*Generate a random variable X that has 10,000 random uniform numbers from 1 to N*
+
+```{r}
+N <- 8
+mu <- (N+1)/2
+sig <- mu
+X <- runif(10000,0,N)
+```
+
+*Then generate a random variable Y that has 10,000 random normal numbers with a mean of mu=sigma=(N+1)/2.*
+
+```{r}
+Y <- rnorm(10000,mu,sig)
+```
+
+*"x" is estimated as the median of the X variable*
+
+```{r}
+x <- median(X)
+```
+
+*"y" is estimated as the 1st quartile of the Y variable*
+
+```{r}
+y <- quantile(Y,0.25)
+
+pX_gt_x <- length(X[X>x])/length(X)
+pX_gt_y <- length(X[X>y])/length(X)
+
+#P(X>x|X>y) = P(X>x intersect X>y)/P(X>y) = P(X>x)/P(X>y)
+pX_gt_x/pX_gt_y
+
+#P(X>x, Y>y)
+pX_gt_x*pX_gt_y
+
+#P(X<x | X>y)
+length(X[X<x&X>y])/length(X[X>y])
+```
+
+*Investigate whether P(X>x and Y>y)=P(X>x)P(Y>y) by building a table and evaluating the marginal and joint probabilities.*
+
+```{r}
+df <- data.frame(cbind(X,Y))
+df$y <- y
+df$x <- x
+df2 <-subset(df,X>x & Y>y)
+nrow(df2)/nrow(df)
+(nrow(subset(df,X>x))/nrow(df)) * (nrow(subset(df,Y>y)))/nrow(df)
+```
+
+*Check to see if independence holds by using Fisher’s Exact Test and the Chi Square Test.*
+
+```{r}
+#fisher.test(X,Y)
+chisq.test(table(X,Y))
+```
+
+*What is the difference between the two? Which is most appropriate?*
+Fisher's exact test is most accurate when working with small sample sizes, which is not the case here. Fisher's tests also provides an exact p-value, but it makes some assumptions about the data structure that may or may not be accurate. For larger sample sizes, we can expect the Chi-Square to be most useful. In this case, the Chi Square Test appears to be most appropriate.
+
+---------------------------------------------------------------------------------------------------------------------------------------------------
+
+*https://www.kaggle.com/c/house-prices-advanced-regression-techniques*
+```{r,echo=FALSE}
+library(corpcor)
+library(matrixcalc)
+library(e1071)
+library(MASS)
+
+train <- read.csv('/Users/samandleo/Downloads/train.csv')
+```
+
+*Provide univariate descriptive statistics and appropriate plots for the training data set*
+
+```{r}
+summary(train)
+
+hist(train$SalePrice)
+plot(SalePrice ~ GrLivArea,data=train)
+```
+
+*Provide a scatterplot matrix for at least two of the independent variables and the dependent variable*
+
+```{r}
+sapply(train,class) #checking for numeric variables
+res <- cor(train[,c("SalePrice","OpenPorchSF","YearRemodAdd")])
+round(res, 2)
+```
+
+*Derive a correlation matrix for any three quantitative variables in the dataset*
+
+```{r}
+cm <- pairs(~SalePrice+LotArea+OverallQual,data=train)
+```
+
+*Test the hypotheses that the correlations between each pairwise set of variables is 0 and provide an 80% confidence interval.*
+
+```{r}
+cor.test(train$SalePrice,train$OverallQual,conf.level=.8)
+cor.test(train$SalePrice,train$LotArea,conf.level=.8)
+cor.test(train$OverallQual,train$SalePrice,conf.level=.8)
+cor.test(train$OverallQual,train$LotArea,conf.level=.8)
+cor.test(train$LotArea,train$SalePrice,conf.level=.8)
+cor.test(train$LotArea,train$OverallQual,conf.level=.8)
+```
+
+*Discuss the meaning of your analysis.  Would you be worried about familywise error? Why or why not?*
+
+Using the cor.test function in R, we were able to reject the null hypothesis that the correlation is 0, with a high signifigance (p-value < 0.05). Due to the high level of signifigance, I would not be worried about familywise error.
+
+*Invert your correlation matrix from above. *
+
+```{r}
+pm <- solve(res)
+```
+
+*Multiply the correlation matrix by the precision matrix, and then multiply the precision matrix by the correlation matrix. *
+
+```{r}
+pm %*% res
+res %*% pm
+```
+
+*Conduct LU decomposition on the matrix.*
+
+```{r}
+lu.decomposition(pm)
+```
+
+*Select a variable in the Kaggle.com training dataset that is skewed to the right, shift it so that the minimum value is absolutely above zero if necessary*
+
+```{r}
+skews <- data.frame(colName = character(), skewness = numeric())
+for(i in colnames(train)){
+    if(class(train[,i])=="integer" & !is.na(skewness(train[,i]))){
+    skews <- rbind(skews,data.frame(i,skewness(train[,i])))
+    }
+}
+skews
+
+train$LotArea.trans <- train$LotArea ^ 2
+```
+
+*fit an exponential probability density function*
+
+```{r}
+lot.fit <- fitdistr(train$LotArea.trans, densfun="exponential")
+lot.fit.func <- function(x){lot.fit$estimate * exp(-lot.fit$estimate * x)}
+```
+
+*Find the optimal value of lamba for this distribution, and then take 1000 samples from this exponential distribution using this value *
+
+```{r}
+opt.lam <- optim(lot.fit$estimate,lot.fit.func)
+opt.samp <- rexp(1000,opt.lam$value)
+```
+
+*Plot a histogram and compare it with a histogram of your original variable*
+
+```{r}
+hist(opt.samp)
+hist(train$LotArea)
+```
+
+*Using the exponential pdf, find the 5th and 95th percentiles using the cumulative distribution function (CDF)*
+
+```{r}
+qexp(.05,rate = opt.lam$value)
+qexp(.05,rate = opt.lam$value, lower.tail = FALSE )
+```
+
+*generate a 95% confidence interval from the empirical data, assuming normality*
+
+```{r}
+ci <- qt(1-(.95/2),df=length(train$LotArea)-1)*sd(train$LotArea)/sqrt(length(train$LotArea))
+print(cbind(mean(train$LotArea)-ci,mean(train$LotArea)+ci))
+```
+
+*provide the empirical 5th percentile and 95th percentile of the data*
+
+```{r}
+quantile(train$LotArea,.05)
+quantile(train$LotArea,.95)
+```
+
+*Build some type of multiple regression  model*
+
+```{r}
+colSums(is.na(train))
+drops <- c("MiscFeature","Fence","PoolQC","FireplaceQu","Alley")
+train<- train[ , !(names(train) %in% drops)]
+
+for(i in colnames(train)){
+    train[,i][is.na(train[,i])] <- sample(train[,i][!is.na(train[,i])],length(train[,i][is.na(train[,i])]))
+}
+
+train.lm <- lm(SalePrice ~ ., data = na.omit(train))
+#train.lm.stepped <- step(train.lm, direction = "backward", trace=FALSE ) 
+#summary(train.lm.stepped)
+
+#keeping only columns w high signifigance; eliminating redundant variables (BsmtSF,GarageCond...)
+keeps <- c("LotArea"
+,"LandSlope"
+,"Neighborhood"
+,"Condition1"
+,"Condition2"
+,"OverallQual"
+,"OverallCond"
+,"YearBuilt"
+,"RoofMatl"
+,"ExterQual"
+,"BsmtQual"
+,"TotalBsmtSF"
+,"GarageQual"
+,"PoolArea"
+,"SaleCondition"
+,"SalePrice"
+)
+train2 <- train[,keeps]
+train.lm2 <- lm(SalePrice ~ ., data = na.omit(train2))
+summary(train.lm2)
+
+drops2 <- c("Condition1","Condition2","YearBuilt","GarageQual","SaleCondition")
+train3 <- train2[ , !(names(train2) %in% drops2)]
+
+train.lm3 <- lm(SalePrice ~ ., data = na.omit(train3))
+summary(train.lm3)
+
+plot(fitted(train.lm3),resid(train.lm3))
+qqnorm(resid(train.lm3))
+qqline(resid(train.lm3))
+
+drops3 <- c("Neighborhood")
+train4 <- train3[ , !(names(train3) %in% drops3)]
+
+train.lm4 <- lm(SalePrice ~ ., data = na.omit(train4))
+summary(train.lm4)
+
+test <- read.csv('/Users/samandleo/Downloads/test.csv')
+keeps <- keeps[keeps != "SalePrice"]
+test <- test[,c(keeps,"Id")]
+test <- test[ , !(names(test) %in% drops2)]
+for(i in colnames(test)){
+    test[,i][is.na(test[,i])] <- sample(test[,i][!is.na(test[,i])],length(test[,i][is.na(test[,i])]))
+}
+
+test$SalePrice <- predict(train.lm3,test)
+colnames(test)
+submission.scd <- subset(test,select=c("Id","SalePrice"))
+
+write.csv(submission.scd,file="submission_scd.csv",row.names=FALSE)
+```
+
+#Username: SamCD
+#Score: 0.20441
